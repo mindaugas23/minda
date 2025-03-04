@@ -1,0 +1,134 @@
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <EEPROM.h>
+
+// Potenciometrai ir vožtuvai
+const int potPin = A0;
+const int speedPotPin = A1;  // Greičio potenciometras
+const int valveUp = 5;
+const int valveDown = 6;
+
+// Mygtukai ir režimo jungiklis
+const int btnUp = 7;
+const int btnDown = 8;
+const int btnAdj = 11;  // Naujas mygtukas pakėlimui/nuleidimui automatiškai
+const int autoSwitch = 9;
+
+// Buzzeris
+const int buzzer = 10;
+
+// LCD ekranas
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+
+// Tikslinė padėtis ir greitis
+int targetPosition;
+int liftSpeed = 150;  // PWM reikšmė (0-255)
+const int tolerance = 20;
+
+void setup() {
+  pinMode(valveUp, OUTPUT);
+  pinMode(valveDown, OUTPUT);
+  pinMode(btnUp, INPUT_PULLUP);
+  pinMode(btnDown, INPUT_PULLUP);
+  pinMode(btnAdj, INPUT_PULLUP);
+  pinMode(autoSwitch, INPUT_PULLUP);
+  pinMode(buzzer, OUTPUT);
+
+  lcd.init();
+  lcd.backlight();
+
+  // Nuskaitome EEPROM reikšmes
+  EEPROM.get(0, targetPosition);
+  EEPROM.get(10, liftSpeed);
+
+  if (targetPosition < 0 || targetPosition > 1023) targetPosition = 512;
+  if (liftSpeed < 50 || liftSpeed > 255) liftSpeed = 150;  // Apsauga nuo blogų reikšmių
+
+  lcd.setCursor(0, 0);
+  lcd.print("Tikslas: ");
+  lcd.print(targetPosition);
+}
+
+void loop() {
+  int potValue = analogRead(potPin);
+  bool isAuto = digitalRead(autoSwitch) == LOW;
+
+  // Nuskaitome greitį iš potenciometro ir išsaugome į EEPROM
+  liftSpeed = map(analogRead(speedPotPin), 0, 1023, 50, 255);
+  EEPROM.put(10, liftSpeed);
+
+  lcd.setCursor(0, 1);
+  lcd.print("Dabart.: ");
+  lcd.print(potValue);
+  lcd.print("  ");
+
+  lcd.setCursor(10, 1);
+  lcd.print("SPD:");
+  lcd.print(liftSpeed);
+
+  if (isAuto) {
+    if (digitalRead(btnAdj) == LOW) {
+      // Jei spaudžiamas reguliavimo mygtukas automatiniame režime
+      if (digitalRead(btnUp) == LOW) {
+        moveUp(liftSpeed);
+        targetPosition = potValue;  // Atnaujiname tikslinę padėtį
+        EEPROM.put(0, targetPosition);
+        beep();
+      } else if (digitalRead(btnDown) == LOW) {
+        moveDown(liftSpeed);
+        targetPosition = potValue;
+        EEPROM.put(0, targetPosition);
+        beep();
+      } else {
+        stopValves();
+      }
+    } else {
+      // Normalus automatinis režimas
+      if (potValue < targetPosition - tolerance) {
+        moveUp(liftSpeed);
+      } else if (potValue > targetPosition + tolerance) {
+        moveDown(liftSpeed);
+      } else {
+        stopValves();
+      }
+    }
+  } else {
+    // Rankinis režimas
+    if (digitalRead(btnUp) == LOW) {
+      moveUp(liftSpeed);
+      targetPosition = potValue;
+      EEPROM.put(0, targetPosition);
+      beep();
+    } else if (digitalRead(btnDown) == LOW) {
+      moveDown(liftSpeed);
+      targetPosition = potValue;
+      EEPROM.put(0, targetPosition);
+      beep();
+    } else {
+      stopValves();
+    }
+  }
+
+  delay(200);
+}
+
+void moveUp(int speed) {
+  analogWrite(valveUp, speed);
+  digitalWrite(valveDown, LOW);
+}
+
+void moveDown(int speed) {
+  digitalWrite(valveUp, LOW);
+  analogWrite(valveDown, speed);
+}
+
+void stopValves() {
+  digitalWrite(valveUp, LOW);
+  digitalWrite(valveDown, LOW);
+}
+
+void beep() {
+  digitalWrite(buzzer, HIGH);
+  delay(100);
+  digitalWrite(buzzer, LOW);
+}
